@@ -147,6 +147,22 @@ async def test_op_status_rejects_bad_id():
 
 
 @pytest.mark.asyncio
+async def test_op_status_surfaces_rejection():
+    client = FakeClient(
+        streams={
+            REQ_ID: [
+                {"kind": 2202, "id": "1" * 64, "pubkey": "d" * 64, "sig": "e" * 128, "content": json.dumps({"reason": "not today"})}
+            ]
+        }
+    )
+    server = NostrHostServer(client, _config(), catalog=FAKE_CATALOG)
+    result = await server.call_tool("op_status", {"operation_id": REQ_ID})
+    body = json.loads(result.content[0].text)
+    assert body["phase"] == "REJECTED"
+    assert body["reason"] == "not today"
+
+
+@pytest.mark.asyncio
 async def test_read_tool_timeout_returns_pending():
     client = FakeClient(streams={REQ_ID: []})
     server = NostrHostServer(client, _config(), catalog=FAKE_CATALOG)

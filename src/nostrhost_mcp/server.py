@@ -27,6 +27,7 @@ from .registry import catalog_by_name, load_catalog, local_helper_tools, tool_me
 KIND_EXECUTION_STARTED = 2203
 KIND_EXECUTION_PROGRESS = 2205
 KIND_EXECUTION_RESULT = 2204
+KIND_OPERATION_REJECTION = 2202
 
 # The authenticated actor (HTTP transport) rides a contextvar so call_tool can
 # tag the signed request with the client npub without per-call plumbing.
@@ -103,26 +104,29 @@ class NostrHostServer(MCPServer):
         """Stream the chain to the terminal 2204 and return the redacted result."""
         events = self._client.events(request_id)
         progress: dict[str, Any] = {}
-        while True:
-            event = await asyncio.to_thread(next, events, None)
-            if event is None:
-                break
-            if not self._client.verify_result_event(event):
-                continue
-            kind = int(event.get("kind") or 0)
-            if kind == KIND_EXECUTION_PROGRESS:
-                body = self._client.parse_progress_event(event)
-                if body:
-                    progress = body
-                    try:
-                        p = float(body.get("progress") or 0)
-                        if context is not None:
-                            await context.report_progress(max(0.0, min(1.0, p)), 1.0)
-                    except (TypeError, ValueError):
-                        pass
-            elif kind == KIND_EXECUTION_RESULT:
-                body = self._client.parse_result_event(event)
-                return self._result_content(body, request_id, tool)
+        try:
+            while True:
+                event = await asyncio.to_thread(next, events, None)
+                if event is None:
+                    break
+                if not self._client.verify_result_event(event):
+                    continue
+                kind = int(event.get("kind") or 0)
+                if kind == KIND_EXECUTION_PROGRESS:
+                    body = self._client.parse_progress_event(event)
+                    if body:
+                        progress = body
+                        try:
+                            p = float(body.get("progress") or 0)
+                            if context is not None:
+                                await context.report_progress(max(0.0, min(1.0, p)), 1.0)
+                        except (TypeError, ValueError):
+                            pass
+                elif kind == KIND_EXECUTION_RESULT:
+                    body = self._client.parse_result_event(event)
+                    return self._result_content(body, request_id, tool)
+        except Exception:  # noqa: BLE001 - a relay/stream hiccup must not crash the server
+            pass
         return self._result_content(
             {"ok": False, "status": "pending", "error": f"no terminal result within {self._config.event_timeout}s", "_nostr_progress": progress},
             request_id,
@@ -135,24 +139,35 @@ class NostrHostServer(MCPServer):
             raise ToolError("op_status requires a 64-hex operation_id")
         events = self._client.events(operation_id)
         latest: dict[str, Any] = {"phase": "REQUESTED"}
-        while True:
-            event = await asyncio.to_thread(next, events, None)
-            if event is None:
-                break
-            if not self._client.verify_result_event(event):
-                continue
-            kind = int(event.get("kind") or 0)
-            if kind == KIND_EXECUTION_STARTED:
-                latest = {"phase": "EXECUTING"}
-            elif kind == KIND_EXECUTION_PROGRESS:
-                body = self._client.parse_progress_event(event)
-                if body:
-                    latest = {"phase": "EXECUTING", "stage": body.get("stage"), "progress": body.get("progress")}
-            elif kind == KIND_EXECUTION_RESULT:
-                body = self._client.parse_result_event(event)
-                phase = "SUCCEEDED" if body.get("ok") else "FAILED"
-                latest = {"phase": phase, **body}
-                break
+        try:
+            while True:
+                event = await asyncio.to_thread(next, events, None)
+                if event is None:
+                    break
+                if not self._client.verify_result_event(event):
+                    continue
+                kind = int(event.get("kind") or 0)
+                if kind == KIND_EXECUTION_STARTED:
+                    latest = {"phase": "EXECUTING"}
+                elif kind == KIND_EXECUTION_PROGRESS:
+                    body = self._client.parse_progress_event(event)
+                    if body:
+                        latest = {"phase": "EXECUTING", "stage": body.get("stage"), "progress": body.get("progress")}
+                elif kind == KIND_OPERATION_REJECTION:
+                    reason = ""
+                    try:
+                        reason = str((json.loads(event.get("content") or "{}") or {}).get("reason") or "")
+                    except (TypeError, json.JSONDecodeError):
+                        pass
+                    latest = {"phase": "REJECTED", "reason": reason}
+                    break
+                elif kind == KIND_EXECUTION_RESULT:
+                    body = self._client.parse_result_event(event)
+                    phase = "SUCCEEDED" if body.get("ok") else "FAILED"
+                    latest = {"phase": phase, **body}
+                    break
+        except Exception:  # noqa: BLE001 - a relay/stream hiccup must not crash the server
+            pass
         body = {"operation_id": operation_id, **latest}
         return CallToolResult(content=[TextContent(type="text", text=json.dumps(self._redact(body), indent=2))])
 

@@ -106,3 +106,23 @@ def test_phase3_mutations_real_catalog():
     assert ungated == [], f"Phase 3 mutations must be approval-gated: {ungated}"
     no_schema = [name for name in PHASE3_MUTATIONS if not by_name[name].get("input_schema")]
     assert no_schema == [], f"Phase 3 mutations missing input schemas: {no_schema}"
+
+
+APPROVAL_SURFACE_HINTS = ("approve", "reject", "confirm", "accept", "deny", "approval")
+
+
+def test_phase4_approval_stays_out_of_mcp_surface():
+    """docs/MCP-TRANSITION.md §7 Phase 4 — the adapter only *surfaces* the
+    approval boundary (approval_required + operation_id + op_status). Pushing
+    approval is a control-plane utility (nostr-opctl approve / NIP-46), so the
+    MCP tool surface must expose no approval/rejection tools."""
+    catalog = FAKE_CATALOG + [
+        {"name": name, "description": name, "require_approval": True, "input_schema": {"type": "object", "properties": {}}}
+        for name in PHASE3_MUTATIONS
+    ]
+    surface = [tool_meta(entry)["name"] for entry in catalog] + [h["name"] for h in local_helper_tools()]
+    offenders = [name for name in surface if any(hint in name.lower() for hint in APPROVAL_SURFACE_HINTS)]
+    assert offenders == [], f"approval/rejection must stay out of the MCP surface, found: {offenders}"
+    assert "op_status" in surface, "op_status must remain the approval-boundary helper"
+    helpers = {h["name"] for h in local_helper_tools()}
+    assert helpers == {"op_status"}, f"only op_status is an adapter-local helper, found: {helpers}"
