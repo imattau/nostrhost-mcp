@@ -42,12 +42,19 @@ class Nip98AuthMiddleware:
         try:
             decoded = authorization.decode("utf-8") if authorization else None
         except UnicodeDecodeError as exc:
-            raise AuthError("malformed Authorization header") from exc
+            await self._error(send, 401, "malformed Authorization header")
+            return
 
+        scheme = scope.get("scheme", "http")
+        host = headers.get(b"host", b"127.0.0.1").decode("utf-8", "replace")
         path = scope.get("path") or "/"
         query = (scope.get("query_string") or b"").decode("latin-1")
-        url = path + (f"?{query}" if query else "")
-        actor = self.auth.verify(decoded, method=scope.get("method", "GET"), url=url, body=body)
+        url = f"{scheme}://{host}{path}" + (f"?{query}" if query else "")
+        try:
+            actor = self.auth.verify(decoded, method=scope.get("method", "GET"), url=url, body=body)
+        except AuthError as exc:
+            await self._error(send, 401, str(exc))
+            return
 
         token = actor_context.set(actor)
         sent_request = False
@@ -63,3 +70,15 @@ class Nip98AuthMiddleware:
             await self.app(scope, replay_receive, send)
         finally:
             actor_context.reset(token)
+
+    @staticmethod
+    async def _error(send: Any, status: int, message: str) -> None:
+        text = message.encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [(b"content-type", b"text/plain; charset=utf-8"), (b"content-length", str(len(text)).encode())],
+            }
+        )
+        await send({"type": "http.response.body", "body": text})
