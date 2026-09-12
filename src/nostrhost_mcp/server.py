@@ -74,7 +74,7 @@ class NostrHostServer(MCPServer):
         spec = self._by_name.get(name)
         if spec is None:
             raise ToolError(f"unknown tool {name!r}")
-        actor = actor_context.get()
+        actor = actor_context.get() or self._config.actor_pubkey
         try:
             submitted = await asyncio.to_thread(self._client.submit, name, arguments or {}, actor and actor or None)
         except OperationClientError as exc:

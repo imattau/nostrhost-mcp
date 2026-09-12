@@ -22,6 +22,7 @@ def _build_server(args: argparse.Namespace, *, catalog: list[dict[str, Any]] | N
         control_relay=args.control_relay,
         server_pubkey=args.server_pubkey,
         event_timeout=args.event_timeout,
+        actor_pubkey=args.actor_pubkey,
     )
     client = OperationClient(config)
     return NostrHostServer(client, config, catalog=catalog)
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--control-relay", metavar="URL", default=None, help="control relay URL (default: ws://127.0.0.1:4848)")
     serve.add_argument("--server-pubkey", metavar="HEX", default=None, help="verify 2203/2204/2205 signatures against this server pubkey")
     serve.add_argument("--event-timeout", type=float, default=90.0, help="seconds to wait for a terminal 2204 (default 90)")
+    serve.add_argument("--actor-pubkey", metavar="HEX", default=None, help="bind this stdio server to an actor identity (default: the requester)")
     serve.set_defaults(func=_cmd_serve)
 
     lst = sub.add_parser("list-tools", help="print the generated tool catalogue")
