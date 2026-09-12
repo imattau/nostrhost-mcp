@@ -21,13 +21,14 @@ class OperationClientError(ValueError):
 def _verify_server_signature(event: dict[str, Any], server_pubkey: str) -> bool:
     """Verify a 2203/2204/2205 event's signature against the server key."""
     try:
-        from coincurve import PublicKeyXOnly
+        from nostr_sdk import Event, PublicKey
 
-        expected = bytes.fromhex(server_pubkey)
-        if bytes.fromhex(str(event.get("pubkey", ""))) != expected:
+        expected = PublicKey.parse(server_pubkey).to_hex()
+        parsed = Event.from_json(json.dumps(event))
+        if parsed.author().to_hex() != expected:
             return False
-        return bool(PublicKeyXOnly(expected).verify(bytes.fromhex(str(event.get("sig", ""))), bytes.fromhex(str(event.get("id", "")))))
-    except (ValueError, TypeError):
+        return bool(parsed.verify())
+    except Exception:  # noqa: BLE001 - malformed SDK event/key means failed verification
         return False
 
 

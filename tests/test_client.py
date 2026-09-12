@@ -5,23 +5,17 @@ from __future__ import annotations
 import json
 
 import pytest
-from coincurve import PrivateKey, PublicKeyXOnly
+from nostr_sdk import EventBuilder, Keys, Kind
 
 from nostrhost_mcp.client import OperationClientError, _verify_server_signature
 from nostrhost_mcp.config import load_config
 
 
 def test_verify_server_signature_accepts_authentic_event():
-    sk = bytes.fromhex("0" * 63 + "1")
-    priv = PrivateKey(sk)
-    pk = PublicKeyXOnly.from_secret(sk).format().hex()
-    event_id = bytes.fromhex("a" * 64)
-    sig = priv.sign_schnorr(event_id)
-    event = {
-        "id": "a" * 64,
-        "pubkey": pk,
-        "sig": sig.hex(),
-    }
+    keys = Keys.parse("0" * 63 + "1")
+    pk = keys.public_key().to_hex()
+    signed = EventBuilder(Kind(2204), '{"ok":true}').finalize(keys)
+    event = json.loads(signed.as_json())
     assert _verify_server_signature(event, pk) is True
 
 

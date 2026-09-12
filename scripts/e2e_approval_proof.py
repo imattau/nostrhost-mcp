@@ -60,17 +60,17 @@ FAILURES: list[str] = []
 
 
 def gen_pk() -> str:
-    from coincurve import PublicKeyXOnly
+    from nostr_sdk import Keys
 
     sk = secrets.token_bytes(32).hex()
-    return PublicKeyXOnly.from_secret(bytes.fromhex(sk)).format().hex()
+    return Keys.parse(sk).public_key().to_hex()
 
 
 def gen_keypair() -> tuple[str, str]:
-    from coincurve import PublicKeyXOnly
+    from nostr_sdk import Keys
 
     sk = secrets.token_bytes(32).hex()
-    return sk, PublicKeyXOnly.from_secret(bytes.fromhex(sk)).format().hex()
+    return sk, Keys.parse(sk).public_key().to_hex()
 
 
 def grant(pk: str, scopes: str) -> None:
@@ -142,11 +142,11 @@ def _relay_allow_pubkey(pubkey: str) -> None:
     consider (and deliberately ignore) it."""
     import tomllib
 
-    from coincurve import PublicKeyXOnly
+    from nostr_sdk import Keys
 
     conf = tomllib.load(open(OPERATOR_TOML, "rb"))
     sk = conf["operator_sk"]
-    op_pk = PublicKeyXOnly.from_secret(bytes.fromhex(sk)).format().hex()
+    op_pk = Keys.parse(sk).public_key().to_hex()
     body = json.dumps({"method": "allowpubkey", "params": [pubkey, "phase4 non-owner admin"]}, separators=(",", ":")).encode()
     content = base64.b64encode(body).decode()
     payload_hash = hashlib.sha256(body).hexdigest()
@@ -166,19 +166,21 @@ def _relay_allow_pubkey(pubkey: str) -> None:
 
 
 def _sign_nip86(sk: str, pk: str, content: str, tags: list) -> dict:
-    from coincurve import PrivateKey
+    from nostr_sdk import EventBuilder, Keys, Kind, Tag, Timestamp
 
     created_at = int(time.time())
-    serialized = json.dumps([0, pk, created_at, 24133, tags, content], separators=(",", ":"), ensure_ascii=False).encode()
-    event_id = hashlib.sha256(serialized).hexdigest()
-    sig = PrivateKey(bytes.fromhex(sk)).sign_schnorr(bytes.fromhex(event_id)).hex()
-    return {"id": event_id, "pubkey": pk, "created_at": created_at, "kind": 24133, "tags": tags, "content": content, "sig": sig}
+    keys = Keys.parse(sk)
+    if keys.public_key().to_hex() != pk.lower():
+        raise ValueError("secret key does not match supplied public key")
+    event = EventBuilder(Kind(24133), content).tags([Tag.parse(tag) for tag in tags])
+    event = event.custom_created_at(Timestamp.from_secs(created_at)).finalize(keys)
+    return json.loads(event.as_json())
 
 
 def _second_admin_keypair(sk: str) -> tuple[str, str]:
-    from coincurve import PublicKeyXOnly
+    from nostr_sdk import Keys
 
-    return sk, PublicKeyXOnly.from_secret(bytes.fromhex(sk)).format().hex()
+    return sk, Keys.parse(sk).public_key().to_hex()
 
 
 def _add_admin_to_operator_toml(pubkey: str) -> bool:

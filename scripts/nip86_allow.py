@@ -12,13 +12,15 @@ KIND_NIP86 = 24133
 
 def _sign(sk, pk, kind, content, tags):
     import time
-    from coincurve import PrivateKey
+    from nostr_sdk import EventBuilder, Keys, Kind, Tag, Timestamp
 
     created_at = int(time.time())
-    serialized = json.dumps([0, pk, created_at, kind, tags, content], separators=(",", ":"), ensure_ascii=False).encode()
-    event_id = hashlib.sha256(serialized).hexdigest()
-    sig = PrivateKey(bytes.fromhex(sk)).sign_schnorr(bytes.fromhex(event_id)).hex()
-    return {"id": event_id, "pubkey": pk, "created_at": created_at, "kind": kind, "tags": tags, "content": content, "sig": sig}
+    keys = Keys.parse(sk)
+    if keys.public_key().to_hex() != pk.lower():
+        raise ValueError("secret key does not match supplied public key")
+    event = EventBuilder(Kind(kind), content).tags([Tag.parse(tag) for tag in tags])
+    event = event.custom_created_at(Timestamp.from_secs(created_at)).finalize(keys)
+    return json.loads(event.as_json())
 
 
 def allow_pubkey(admin_sk: str, admin_pk: str, pubkey: str, reason: str) -> str:
@@ -42,11 +44,11 @@ def allow_pubkey(admin_sk: str, admin_pk: str, pubkey: str, reason: str) -> str:
 
 def operator_keys():
     import tomllib
-    from coincurve import PublicKeyXOnly
+    from nostr_sdk import Keys
 
     conf = tomllib.load(open("/etc/nostrhost/operator.toml", "rb"))
     sk = conf["operator_sk"]
-    pk = PublicKeyXOnly.from_secret(bytes.fromhex(sk)).format().hex()
+    pk = Keys.parse(sk).public_key().to_hex()
     return sk, pk
 
 

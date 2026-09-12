@@ -28,10 +28,10 @@ NOSTRHOST_BIN = "/usr/bin/nostrhost"
 
 
 def gen_pk() -> str:
-    from coincurve import PublicKeyXOnly
+    from nostr_sdk import Keys
 
     sk = secrets.token_bytes(32).hex()
-    return PublicKeyXOnly.from_secret(bytes.fromhex(sk)).format().hex()
+    return Keys.parse(sk).public_key().to_hex()
 
 
 def grant(pk: str, scopes: str) -> None:

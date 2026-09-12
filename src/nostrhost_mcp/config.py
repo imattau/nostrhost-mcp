@@ -24,9 +24,12 @@ class Config:
 
 
 def _derive_pubkey(sk: str) -> str:
-    from coincurve import PublicKeyXOnly
+    from nostr_sdk import Keys
 
-    return PublicKeyXOnly.from_secret(bytes.fromhex(sk)).format().hex()
+    try:
+        return Keys.parse(sk).public_key().to_hex()
+    except Exception as exc:  # noqa: BLE001 - normalize rust-nostr parse errors
+        raise ValueError("not a valid secp256k1 private key") from exc
 
 
 def _fork_operator_defaults(control_relay: str | None) -> tuple[str, str, str]:
