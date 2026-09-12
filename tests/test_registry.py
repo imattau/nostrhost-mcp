@@ -2,7 +2,31 @@
 
 from __future__ import annotations
 
-from nostrhost_mcp.registry import catalog_by_name, local_helper_tools, tool_meta
+import pytest
+
+from nostrhost_mcp.registry import catalog_by_name, load_catalog, local_helper_tools, tool_meta
+
+# docs/MCP-TRANSITION.md §7 Phase 3 — signed mutations + streaming. Every one
+# of these write ops must be registered, approval-gated and schema'd so the
+# adapter can submit the signed kind-2200 and stream 2203/2205/2204.
+PHASE3_MUTATIONS = [
+    "service.restart",
+    "service.control",
+    "backup.create",
+    "dns.apply",
+    "dns.subscribe",
+    "dns.unsubscribe",
+    "credential.set",
+    "credential.remove",
+    "domain.add",
+    "domain.remove",
+    "app.install",
+    "app.upgrade",
+    "app.remove",
+    "package.reconcile",
+    "state.reconcile",
+    "rollback.apply",
+]
 
 FAKE_CATALOG = [
     {
@@ -54,3 +78,31 @@ def test_local_helper_tools_expose_op_status():
     assert "op_status" in names
     status = next(h for h in helpers if h["name"] == "op_status")
     assert "operation_id" in status["input_schema"]["required"]
+
+
+def test_phase3_mutations_registered_approval_gated_and_schemaed():
+    """Every Phase 3 mutation is present, requires approval, and carries a schema."""
+    catalog = [
+        {"name": name, "require_approval": True, "input_schema": {"type": "object", "properties": {name: {"type": "string"}}}}
+        for name in PHASE3_MUTATIONS
+    ]
+    by_name = catalog_by_name(catalog)
+    assert set(PHASE3_MUTATIONS) == set(by_name)
+    for name in PHASE3_MUTATIONS:
+        assert by_name[name]["require_approval"] is True, name
+        assert isinstance(by_name[name]["input_schema"].get("properties"), dict), name
+
+
+def test_phase3_mutations_real_catalog():
+    """Against the installed fork catalogue (skipped when the fork is absent)."""
+    try:
+        catalog = load_catalog()
+    except ImportError:
+        pytest.skip("NostrHost fork (yunohost.nostr_operations) is not importable here")
+    by_name = catalog_by_name(catalog)
+    missing = [name for name in PHASE3_MUTATIONS if name not in by_name]
+    assert missing == [], f"Phase 3 mutation tools missing from the catalogue: {missing}"
+    ungated = [name for name in PHASE3_MUTATIONS if not by_name[name]["require_approval"]]
+    assert ungated == [], f"Phase 3 mutations must be approval-gated: {ungated}"
+    no_schema = [name for name in PHASE3_MUTATIONS if not by_name[name].get("input_schema")]
+    assert no_schema == [], f"Phase 3 mutations missing input schemas: {no_schema}"
