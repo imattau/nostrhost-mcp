@@ -41,7 +41,7 @@ class Nip98AuthMiddleware:
         authorization = headers.get(b"authorization")
         try:
             decoded = authorization.decode("utf-8") if authorization else None
-        except UnicodeDecodeError as exc:
+        except UnicodeDecodeError:
             await self._error(send, 401, "malformed Authorization header")
             return
 
