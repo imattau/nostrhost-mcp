@@ -1,0 +1,75 @@
+"""Operation registry bridge: the fork's registry is the single source of
+truth, and this module turns its catalogue into MCP tool metadata.
+
+The fork exposes ``yunohost.nostr_operations.operation_catalog()`` (one entry
+per tool: name, scope, require_approval, risk, reversibility, description,
+input JSON Schema). Generated MCP tools, Admin forms and API docs all derive
+from that same catalogue — no second schema catalogue is maintained here.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import types
+from pathlib import Path
+from typing import Any
+
+
+def ensure_yunohost() -> None:
+    """Make the fork's package importable.
+
+    On a NostrHost node the fork is installed as a real ``yunohost`` package.
+    For development the fork lives as a flat ``src/`` tree; when
+    ``NOSTRHOST_FORK_SRC`` points at it, alias ``yunohost`` to that directory
+    (the same alias the fork's own test conftest applies).
+    """
+    try:
+        import yunohost  # noqa: F401
+    except ImportError:
+        src = os.environ.get("NOSTRHOST_FORK_SRC")
+        if src and Path(src).is_dir():
+            pkg = types.ModuleType("yunohost")
+            pkg.__path__ = [str(Path(src))]  # type: ignore[attr-defined]
+            sys.modules.setdefault("yunohost", pkg)
+
+
+def load_catalog() -> list[dict[str, Any]]:
+    """The JSON-serialisable operation catalogue from the installed fork."""
+    ensure_yunohost()
+    from yunohost.nostr_operations import operation_catalog
+
+    return operation_catalog()
+
+
+def catalog_by_name(catalog: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {entry["name"]: entry for entry in catalog}
+
+
+def tool_meta(entry: dict[str, Any]) -> dict[str, Any]:
+    """MCP ``Tool``-style metadata for one catalogue entry."""
+    return {
+        "name": entry["name"],
+        "description": entry["description"],
+        "input_schema": entry.get("input_schema") or {"type": "object", "properties": {}},
+    }
+
+
+def local_helper_tools() -> list[dict[str, Any]]:
+    """Adapter-local helper tools (not registry operations).
+
+    These assist result translation (the layer the adapter keeps, per
+    docs/MCP-TRANSITION.md §2) — e.g. polling an in-flight operation that is
+    awaiting approval. They never carry authority themselves.
+    """
+    return [
+        {
+            "name": "op_status",
+            "description": "poll the live state of a submitted operation (REQUESTED/APPROVED/EXECUTING/SUCCEEDED/FAILED); returns the result when terminal",
+            "input_schema": {
+                "type": "object",
+                "properties": {"operation_id": {"type": "string", "description": "the 64-hex kind-2200 request event id", "minLength": 64, "maxLength": 64}},
+                "required": ["operation_id"],
+            },
+        }
+    ]

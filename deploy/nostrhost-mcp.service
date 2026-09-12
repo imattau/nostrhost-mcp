@@ -1,0 +1,31 @@
+[Unit]
+Description=NostrHost MCP protocol adapter (thin operation client)
+After=network-online.target nostrhost-control.service nostr-operationsd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Unprivileged: the MCP process only signs kind-2200 requests with a
+# (delegated) agent key and reads the loopback control relay. It must never
+# hold root or host write authority (docs/MCP-TRANSITION.md §7).
+User=nostr-mcp
+Group=nostr-mcp
+ExecStart=/opt/nostrhost/venv/bin/nostrhost-mcp serve --stdio
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET
+# The agent key is supplied read-only (env or a 0640 root:nostr-mcp file).
+EnvironmentFile=-/etc/nostrhost/mcp.env
+ReadOnlyPaths=/etc/nostrhost/mcp.env
+NetworkNamespacePath=/run/netns/nostr-mcp
+
+[Install]
+WantedBy=multi-user.target
