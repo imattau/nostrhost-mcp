@@ -71,5 +71,10 @@ def local_helper_tools() -> list[dict[str, Any]]:
                 "properties": {"operation_id": {"type": "string", "description": "the 64-hex kind-2200 request event id", "minLength": 64, "maxLength": 64}},
                 "required": ["operation_id"],
             },
-        }
+        },
+        {
+            "name": "mcp_status",
+            "description": "adapter self-check: whether this endpoint is reachable and which identity (if any) this call is recognised as — answered locally, no operation submitted",
+            "input_schema": {"type": "object", "properties": {}},
+        },
     ]

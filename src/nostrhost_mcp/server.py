@@ -72,6 +72,8 @@ class NostrHostServer(MCPServer):
     async def call_tool(self, name: str, arguments: dict[str, Any], context=None) -> CallToolResult:  # type: ignore[override]
         if name == "op_status":
             return await self._call_op_status(arguments, context)
+        if name == "mcp_status":
+            return self._call_mcp_status()
         spec = self._by_name.get(name)
         if spec is None:
             raise ToolError(f"unknown tool {name!r}")
@@ -170,6 +172,37 @@ class NostrHostServer(MCPServer):
             pass
         body = {"operation_id": operation_id, **latest}
         return CallToolResult(content=[TextContent(type="text", text=json.dumps(self._redact(body), indent=2))])
+
+    def _call_mcp_status(self) -> CallToolResult:
+        """Answer locally: is this endpoint up, and who is this call recognised as.
+
+        Unlike every generated tool, this never submits a signed operation —
+        reaching this code at all already proves the transport, and (over
+        HTTP) NIP-98 auth, are working. It exists because the adapter has no
+        ``whoami`` op (the registry has none) and a status check that goes
+        through the full 2200 chain would fail exactly when it's most useful
+        (relay/executor down). See docs/MCP-TRANSITION.md Issue 10.
+        """
+        actor = actor_context.get()
+        if actor:
+            actor_source = "nip98"
+        elif self._config.actor_pubkey:
+            actor = self._config.actor_pubkey
+            actor_source = "configured"
+        else:
+            actor = None
+            actor_source = "unbound"
+        body = {
+            "server": "nostrhost-mcp",
+            "version": __version__,
+            "tools_available": len(self._tools),
+            "control_relay": self._config.control_relay,
+            "agent_pubkey": self._config.agent_pubkey,
+            "server_signature_verified": bool(self._config.server_pubkey),
+            "actor": actor,
+            "actor_source": actor_source,
+        }
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(body, indent=2))])
 
     def _result_content(self, body: dict[str, Any], request_id: str, tool: str) -> CallToolResult:
         payload = {"operation_id": request_id, "tool": tool, **body}
