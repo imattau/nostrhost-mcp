@@ -41,17 +41,41 @@ def _cmd_list_tools(args: argparse.Namespace) -> int:
 def _cmd_serve(args: argparse.Namespace) -> int:
     server = _build_server(args)
     if args.http:
-        return _serve_http(server, args.http)
+        return _serve_http(server, args.http, allowed_hosts=args.http_allowed_hosts)
     server.run(transport="stdio")
     return 0
 
 
-def _serve_http(server: Any, port: int) -> int:
+def _serve_http(server: Any, port: int, *, allowed_hosts: list[str] | None = None) -> int:
     import uvicorn
 
     from .http import Nip98AuthMiddleware
 
-    app = server.streamable_http_app()
+    # streamable_http_app() defaults host="127.0.0.1", which makes the MCP SDK
+    # auto-enable DNS-rebinding protection with only loopback allowed_hosts. That
+    # is correct for a direct loopback client but rejects requests that arrive
+    # through a reverse proxy with a different Host header (e.g. Caddy in front,
+    # mcp.nostrhost.test). When the operator names additional hosts, pass an
+    # explicit TransportSecuritySettings so the proxy's Host header is accepted
+    # while DNS-rebinding protection stays on for everything else.
+    kwargs = {}
+    if allowed_hosts:
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        # The middleware's allowed_hosts are matched two ways: an exact host
+        # match, or a `base:*` pattern that only matches a host WITH a port.
+        # A reverse proxy forwards Host without a port (e.g. mcp.nostrhost.test),
+        # so each additional host needs both the bare name and the wildcard form.
+        extra = []
+        for h in allowed_hosts:
+            extra.append(h)
+            extra.append(f"{h}:*")
+        kwargs["transport_security"] = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=["127.0.0.1", "localhost", "127.0.0.1:*", "localhost:*", "[::1]:*"] + extra,
+        )
+
+    app = server.streamable_http_app(**kwargs)
     wrapped = Nip98AuthMiddleware(app)
     uvicorn.run(wrapped, host="127.0.0.1", port=int(port), log_level="warning")
     return 0
@@ -64,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="run the MCP adapter (stdio or loopback streamable HTTP)")
     serve.add_argument("--stdio", action="store_true", help="serve over stdio (default)")
     serve.add_argument("--http", metavar="PORT", type=int, default=0, help="serve streamable HTTP on 127.0.0.1:PORT (loopback only)")
+    serve.add_argument("--http-allowed-hosts", metavar="HOST", nargs="*", default=None, help="additional Host headers to accept behind a reverse proxy (DNS-rebinding allowlist)")
     serve.add_argument("--agent-sk", metavar="HEX", default=None, help="agent secret key (default: fork operator config)")
     serve.add_argument("--control-relay", metavar="URL", default=None, help="control relay URL (default: ws://127.0.0.1:4848)")
     serve.add_argument("--server-pubkey", metavar="HEX", default=None, help="verify 2203/2204/2205 signatures against this server pubkey")

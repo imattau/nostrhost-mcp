@@ -64,7 +64,7 @@ class Nip98AuthMiddleware:
             if not sent_request:
                 sent_request = True
                 return {"type": "http.request", "body": body, "more_body": False}
-            return {"type": "http.disconnect"}
+            return await receive()
 
         try:
             await self.app(scope, replay_receive, send)
