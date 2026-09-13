@@ -1,31 +1,27 @@
 [Unit]
-Description=NostrHost MCP protocol adapter (thin operation client)
+Description=NostrHost MCP protocol adapter (loopback streamable HTTP)
 After=network-online.target nostrhost-control.service nostr-operationsd.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-# Unprivileged: the MCP process only signs kind-2200 requests with a
-# (delegated) agent key and reads the loopback control relay. It must never
-# hold root or host write authority (docs/MCP-TRANSITION.md §7).
-User=nostr-mcp
-Group=nostr-mcp
-ExecStart=/opt/nostrhost/venv/bin/nostrhost-mcp serve --stdio
+# Binds 127.0.0.1:8930 only; Caddy (or another reverse proxy) fronts it when
+# the endpoint is exposed on a public hostname. The MCP SDK auto-enables
+# DNS-rebinding protection, so a reverse-proxy Host name must be allowlisted
+# via NOSTRHOST_MCP_ALLOWED_HOSTS in /etc/nostrhost/mcp.env (space/comma
+# separated). Without it, proxied requests are rejected with 421.
+ExecStart=/opt/nostrhost/venv/bin/nostrhost-mcp serve --http 8930
+EnvironmentFile=-/etc/nostrhost/mcp.env
 Restart=on-failure
 RestartSec=5s
+User=root
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectHome=true
-ProtectSystem=strict
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictAddressFamilies=AF_UNIX AF_INET
-# The agent key is supplied read-only (env or a 0640 root:nostr-mcp file).
-EnvironmentFile=-/etc/nostrhost/mcp.env
-ReadOnlyPaths=/etc/nostrhost/mcp.env
-NetworkNamespacePath=/run/netns/nostr-mcp
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths=/etc/nostrhost
+ReadOnlyPaths=/etc/nostrhost/operator.toml
 
 [Install]
 WantedBy=multi-user.target

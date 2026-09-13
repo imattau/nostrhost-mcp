@@ -41,9 +41,25 @@ def _cmd_list_tools(args: argparse.Namespace) -> int:
 def _cmd_serve(args: argparse.Namespace) -> int:
     server = _build_server(args)
     if args.http:
-        return _serve_http(server, args.http, allowed_hosts=args.http_allowed_hosts)
+        allowed_hosts = args.http_allowed_hosts or _allowed_hosts_from_env()
+        return _serve_http(server, args.http, allowed_hosts=allowed_hosts)
     server.run(transport="stdio")
     return 0
+
+
+def _allowed_hosts_from_env() -> list[str] | None:
+    """Read additional reverse-proxy Host names from NOSTRHOST_MCP_ALLOWED_HOSTS.
+
+    Lets a systemd unit (EnvironmentFile=/etc/nostrhost/mcp.env) name the
+    public Caddy hostname(s) without editing the unit. Accepts whitespace- or
+    comma-separated hostnames.
+    """
+    import os
+
+    raw = os.environ.get("NOSTRHOST_MCP_ALLOWED_HOSTS", "").strip()
+    if not raw:
+        return None
+    return [h.strip() for h in raw.replace(",", " ").split() if h.strip()]
 
 
 def _serve_http(server: Any, port: int, *, allowed_hosts: list[str] | None = None) -> int:

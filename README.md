@@ -77,9 +77,17 @@ Agent config for MCP clients (e.g. `opencode.json`):
 
 ## Deploy
 
-`deploy/nostrhost-mcp.service` runs the adapter as an unprivileged `nostr-mcp`
-user with no host write authority. Supply the (delegated) agent key via
-`/etc/nostrhost/mcp.env` (`NOSTRHOST_AGENT_SK=...`), root-owned and read-only.
+`deploy/nostrhost-mcp.service` runs the adapter as a loopback streamable HTTP
+server (`127.0.0.1:8930`). A reverse proxy (Caddy) fronts it when the endpoint
+is exposed on a public hostname; name that hostname in `/etc/nostrhost/mcp.env`
+(`NOSTRHOST_MCP_ALLOWED_HOSTS=mcp.example.test`, space/comma separated) or the
+MCP SDK's DNS-rebinding protection rejects proxied requests with 421. The unit
+reads the fork's operator config for its key and control relay, so it needs
+`nostrhost-core` + `nostrhost-runtime` installed.
+
+Installable as the `python3-nostrhost-mcp` APT package (see
+`packaging/packages.yml` in the umbrella), which provisions the adapter into
+`/opt/nostrhost/venv` and ships this unit (not auto-enabled).
 
 ## Development
 
