@@ -80,6 +80,14 @@ def test_local_helper_tools_expose_op_status():
     assert "operation_id" in status["input_schema"]["required"]
 
 
+def test_local_helper_tools_expose_mcp_status():
+    helpers = local_helper_tools()
+    names = {h["name"] for h in helpers}
+    assert "mcp_status" in names
+    status = next(h for h in helpers if h["name"] == "mcp_status")
+    assert status["input_schema"] == {"type": "object", "properties": {}}
+
+
 def test_phase3_mutations_registered_approval_gated_and_schemaed():
     """Every Phase 3 mutation is present, requires approval, and carries a schema."""
     catalog = [
@@ -125,4 +133,4 @@ def test_phase4_approval_stays_out_of_mcp_surface():
     assert offenders == [], f"approval/rejection must stay out of the MCP surface, found: {offenders}"
     assert "op_status" in surface, "op_status must remain the approval-boundary helper"
     helpers = {h["name"] for h in local_helper_tools()}
-    assert helpers == {"op_status"}, f"only op_status is an adapter-local helper, found: {helpers}"
+    assert helpers == {"op_status", "mcp_status"}, f"only op_status/mcp_status are adapter-local helpers, found: {helpers}"

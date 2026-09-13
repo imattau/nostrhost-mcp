@@ -73,7 +73,8 @@ async def test_list_tools_includes_catalog_and_helpers():
     assert "system.status" in names
     assert "app.install" in names
     assert "op_status" in names
-    assert len(names) == len(FAKE_CATALOG) + 1
+    assert "mcp_status" in names
+    assert len(names) == len(FAKE_CATALOG) + 2
 
 
 @pytest.mark.asyncio
@@ -120,6 +121,44 @@ async def test_actor_is_passed_to_submit():
     finally:
         actor_context.reset(token)
     assert client.submits[0][2] == "f" * 64
+
+
+@pytest.mark.asyncio
+async def test_mcp_status_is_unbound_when_no_actor_configured():
+    client = FakeClient()
+    server = NostrHostServer(client, _config(), catalog=FAKE_CATALOG)
+    result = await server.call_tool("mcp_status", {})
+    body = json.loads(result.content[0].text)
+    assert body["server"] == "nostrhost-mcp"
+    assert body["tools_available"] == len(FAKE_CATALOG) + 2
+    assert body["control_relay"] == "ws://127.0.0.1:4848"
+    assert body["actor"] is None
+    assert body["actor_source"] == "unbound"
+    assert client.submits == []  # answered locally, no operation submitted
+
+
+@pytest.mark.asyncio
+async def test_mcp_status_reports_configured_actor():
+    config = Config(agent_sk="b" * 64, agent_pubkey="c" * 64, control_relay="ws://127.0.0.1:4848", actor_pubkey="1" * 64)
+    server = NostrHostServer(FakeClient(), config, catalog=FAKE_CATALOG)
+    result = await server.call_tool("mcp_status", {})
+    body = json.loads(result.content[0].text)
+    assert body["actor"] == "1" * 64
+    assert body["actor_source"] == "configured"
+
+
+@pytest.mark.asyncio
+async def test_mcp_status_prefers_nip98_actor_over_configured():
+    config = Config(agent_sk="b" * 64, agent_pubkey="c" * 64, control_relay="ws://127.0.0.1:4848", actor_pubkey="1" * 64)
+    server = NostrHostServer(FakeClient(), config, catalog=FAKE_CATALOG)
+    token = actor_context.set("f" * 64)
+    try:
+        result = await server.call_tool("mcp_status", {})
+    finally:
+        actor_context.reset(token)
+    body = json.loads(result.content[0].text)
+    assert body["actor"] == "f" * 64
+    assert body["actor_source"] == "nip98"
 
 
 @pytest.mark.asyncio

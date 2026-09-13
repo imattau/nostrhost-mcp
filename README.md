@@ -35,6 +35,10 @@ Claude / Codex / OpenCode
   `approval_required` + `operation_id` and execute only after an admin (or
   NIP-46 owner) approves in the control plane; poll `op_status` for the
   result.
+- **`mcp_status`** answers locally, without submitting an operation: is this
+  endpoint reachable, and which identity (if any) is this call recognised
+  as. Use it instead of a registry op to sanity-check a new connection — it
+  still works even if the control relay or executor is down.
 - **HTTP transport** verifies each request's NIP-98 header against
   `nostrhost-policy` and binds the client npub as the operation `actor`. It
   binds **loopback only** — the MCP server is never exposed publicly.
