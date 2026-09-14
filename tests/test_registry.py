@@ -161,6 +161,9 @@ def test_real_catalog_includes_nsite_tools_with_schemas():
         "nsite.publish",
         "nsite.snapshot",
         "nsite.mirror",
+        "nsite.domain.list",
+        "nsite.domain.attach",
+        "nsite.domain.detach",
     ):
         entry = by_name[name]
         assert entry["scope"].startswith("nsites.")
@@ -178,7 +181,7 @@ def test_nsite_write_tools_require_approval():
         _pytest.skip("NOSTRHOST_FORK_SRC not set")
     catalog = load_catalog()
     by_name = catalog_by_name(catalog)
-    for name in ("nsite.publish", "nsite.snapshot", "nsite.mirror", "nsite.register", "nsite.unregister"):
+    for name in ("nsite.publish", "nsite.snapshot", "nsite.mirror", "nsite.register", "nsite.unregister", "nsite.domain.attach", "nsite.domain.detach"):
         assert by_name[name]["require_approval"] is True
-    for name in ("nsite.list", "nsite.inspect", "nsite.resolve", "nsite.validate_manifest", "nsite.publish.plan"):
+    for name in ("nsite.list", "nsite.inspect", "nsite.resolve", "nsite.validate_manifest", "nsite.publish.plan", "nsite.domain.list"):
         assert by_name[name]["require_approval"] is False
