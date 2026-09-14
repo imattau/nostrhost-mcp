@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from nostrhost_mcp.registry import catalog_by_name, load_catalog, local_helper_tools, tool_meta
@@ -134,3 +136,49 @@ def test_phase4_approval_stays_out_of_mcp_surface():
     assert "op_status" in surface, "op_status must remain the approval-boundary helper"
     helpers = {h["name"] for h in local_helper_tools()}
     assert helpers == {"op_status", "mcp_status"}, f"only op_status/mcp_status are adapter-local helpers, found: {helpers}"
+
+
+def test_real_catalog_includes_nsite_tools_with_schemas():
+    """Phase 3b: the generated MCP surface derives from the fork's operation
+    catalogue, so every nsites tool (incl. the Phase 3b mirror) must appear
+    with the registry's scope/approval/schema, not a hand-maintained copy."""
+    if not os.environ.get("NOSTRHOST_FORK_SRC"):
+        import pytest as _pytest
+
+        _pytest.skip("NOSTRHOST_FORK_SRC not set; run with the fork src aliased to yunohost")
+    catalog = load_catalog()
+    by_name = catalog_by_name(catalog)
+    for name in (
+        "nsite.gateway.status",
+        "nsite.list",
+        "nsite.inspect",
+        "nsite.resolve",
+        "nsite.validate_manifest",
+        "nsite.reachability",
+        "nsite.publish.plan",
+        "nsite.register",
+        "nsite.unregister",
+        "nsite.publish",
+        "nsite.snapshot",
+        "nsite.mirror",
+    ):
+        entry = by_name[name]
+        assert entry["scope"].startswith("nsites.")
+        assert entry["require_approval"] in (True, False)
+        # tools without arguments carry no schema (the MCP layer fills an empty
+        # object); every arg-carrying tool must expose a real object schema
+        schema = entry["input_schema"]
+        assert schema is None or schema.get("type") == "object"
+
+
+def test_nsite_write_tools_require_approval():
+    if not os.environ.get("NOSTRHOST_FORK_SRC"):
+        import pytest as _pytest
+
+        _pytest.skip("NOSTRHOST_FORK_SRC not set")
+    catalog = load_catalog()
+    by_name = catalog_by_name(catalog)
+    for name in ("nsite.publish", "nsite.snapshot", "nsite.mirror", "nsite.register", "nsite.unregister"):
+        assert by_name[name]["require_approval"] is True
+    for name in ("nsite.list", "nsite.inspect", "nsite.resolve", "nsite.validate_manifest", "nsite.publish.plan"):
+        assert by_name[name]["require_approval"] is False

@@ -206,12 +206,38 @@ class NostrHostServer(MCPServer):
 
     def _result_content(self, body: dict[str, Any], request_id: str, tool: str) -> CallToolResult:
         payload = {"operation_id": request_id, "tool": tool, **body}
-        return CallToolResult(content=[TextContent(type="text", text=json.dumps(self._redact(payload), indent=2))])
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(self._redact(payload, tool=tool), indent=2))])
 
     @staticmethod
-    def _redact(value: Any) -> Any:
+    def _redact(value: Any, *, tool: str = "") -> Any:
         try:
             from nostrhost_policy.redaction import redact
         except ImportError:
             return value
-        return redact(value)
+        value = redact(value)
+        if tool.startswith("nsite."):
+            return NostrHostServer._redact_nsite(value)
+        return value
+
+    @staticmethod
+    def _redact_nsite(value: Any) -> Any:
+        """Phase 3b: redact untrusted NIP-5A free text and site titles.
+
+        Manifest ``content`` is arbitrary user content and a site ``title``
+        comes from the manifest's untrusted ``title`` tag — both are replaced
+        with a marker before they can reach an MCP client's context, so a
+        hostile manifest cannot inject text (prompt injection) or bloat the
+        result. Identity (pubkey/label/kind/d/hashes) is preserved.
+        """
+        if isinstance(value, dict):
+            return {
+                k: (
+                    "[REDACTED]"
+                    if k in ("content", "title") and isinstance(v, str)
+                    else NostrHostServer._redact_nsite(v)
+                )
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [NostrHostServer._redact_nsite(v) for v in value]
+        return value
