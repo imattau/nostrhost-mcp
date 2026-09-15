@@ -10,8 +10,6 @@ own — the daemon evaluates the requester's capabilities/delegations.
 
 from __future__ import annotations
 
-from typing import Any
-
 
 class AuthError(ValueError):
     """The NIP-98 credential could not be verified."""
@@ -54,12 +52,3 @@ class Nip98Auth:
         except ValueError as exc:
             raise AuthError(f"NIP-98 verification failed: {exc}") from exc
         return str(identity.pubkey)
-
-
-def redact_secret_shaped(value: Any) -> Any:
-    """Redact secret-shaped values in results (lazy policy import)."""
-    try:
-        from nostrhost_policy.redaction import redact
-    except ImportError:
-        return value
-    return redact(value)
