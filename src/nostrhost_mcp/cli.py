@@ -12,7 +12,7 @@ import sys
 from typing import Any
 
 
-def _build_server(args: argparse.Namespace, *, catalog: list[dict[str, Any]] | None = None) -> Any:
+def _build_server(args: argparse.Namespace, *, catalog: list[dict[str, Any]] | None = None, require_agent_key: bool = False) -> Any:
     from .client import OperationClient
     from .config import load_config
     from .server import NostrHostServer
@@ -23,6 +23,7 @@ def _build_server(args: argparse.Namespace, *, catalog: list[dict[str, Any]] | N
         server_pubkey=args.server_pubkey,
         event_timeout=args.event_timeout,
         actor_pubkey=args.actor_pubkey,
+        require_agent_key=require_agent_key,
     )
     client = OperationClient(config)
     return NostrHostServer(client, config, catalog=catalog)
@@ -39,7 +40,10 @@ def _cmd_list_tools(args: argparse.Namespace) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    server = _build_server(args)
+    # The HTTP path is network-facing (Caddy-fronted): it must never
+    # silently fall back to the operator key (M6). Stdio is a local trust
+    # boundary, so it keeps the operator-config fallback for convenience.
+    server = _build_server(args, require_agent_key=bool(args.http))
     if args.http:
         allowed_hosts = args.http_allowed_hosts or _allowed_hosts_from_env()
         return _serve_http(server, args.http, allowed_hosts=allowed_hosts)
@@ -105,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--stdio", action="store_true", help="serve over stdio (default)")
     serve.add_argument("--http", metavar="PORT", type=int, default=0, help="serve streamable HTTP on 127.0.0.1:PORT (loopback only)")
     serve.add_argument("--http-allowed-hosts", metavar="HOST", nargs="*", default=None, help="additional Host headers to accept behind a reverse proxy (DNS-rebinding allowlist)")
-    serve.add_argument("--agent-sk", metavar="HEX", default=None, help="agent secret key (default: fork operator config)")
+    serve.add_argument("--agent-sk", metavar="HEX", default=None, help="scoped agent secret key (required for --http; default for stdio is the fork operator config)")
     serve.add_argument("--control-relay", metavar="URL", default=None, help="control relay URL (default: ws://127.0.0.1:4848)")
     serve.add_argument("--server-pubkey", metavar="HEX", default=None, help="verify 2203/2204/2205 signatures against this server pubkey")
     serve.add_argument("--event-timeout", type=float, default=90.0, help="seconds to wait for a terminal 2204 (default 90)")

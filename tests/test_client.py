@@ -59,3 +59,14 @@ def test_load_config_rejects_bad_key():
 def test_load_config_rejects_bad_server_pubkey():
     with pytest.raises(ValueError):
         load_config(agent_sk="0" * 64, control_relay="ws://r", server_pubkey="nope")
+
+
+def test_http_serve_requires_explicit_agent_key():
+    """M6: a network-facing process must never silently fall back to the
+    operator key; the HTTP path fails closed without an explicit agent key."""
+    with pytest.raises(ValueError, match="agent key"):
+        load_config(require_agent_key=True)
+
+    # Providing an explicit agent key satisfies the check.
+    cfg = load_config(agent_sk="0" * 63 + "1", control_relay="ws://r", require_agent_key=True)
+    assert len(cfg.agent_pubkey) == 64

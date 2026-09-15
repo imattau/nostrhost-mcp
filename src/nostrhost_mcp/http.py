@@ -14,6 +14,11 @@ from typing import Any
 from .auth import AuthError, Nip98Auth
 from .server import actor_context
 
+# Cap the request body buffered before authentication. The endpoint is
+# Caddy-fronted on a public hostname; without a cap, an unauthenticated
+# client can stream an unbounded body and exhaust memory on the (root) worker.
+MAX_REQUEST_BODY_BYTES = 1024 * 1024  # 1 MiB
+
 
 class Nip98AuthMiddleware:
     """ASGI middleware: verify NIP-98 and set the actor contextvar."""
@@ -28,11 +33,17 @@ class Nip98AuthMiddleware:
             return
 
         chunks: list[bytes] = []
+        size = 0
         while True:
             message = await receive()
             if message.get("type") != "http.request":
                 continue
-            chunks.append(message.get("body") or b"")
+            body = message.get("body") or b""
+            size += len(body)
+            if size > MAX_REQUEST_BODY_BYTES:
+                await self._error(send, 413, "request body too large")
+                return
+            chunks.append(body)
             if not message.get("more_body"):
                 break
         body = b"".join(chunks)

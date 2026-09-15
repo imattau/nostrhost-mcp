@@ -50,6 +50,18 @@ def _fork_operator_defaults(control_relay: str | None) -> tuple[str, str, str]:
     return cfg.operator_sk, cfg.operator_pubkey, relay
 
 
+def _fork_server_pubkey() -> str | None:
+    """The executor's server pubkey (the key the daemon signs 2203/2204/2205
+    with), from the fork operator config. None when the fork config is not
+    available (e.g. development, or the node is not yet bootstrapped)."""
+    try:
+        from yunohost.nostr_operations import _operator_config
+
+        return _operator_config(None, None).server_pubkey
+    except Exception:  # noqa: BLE001 - unavailable fork config means no key
+        return None
+
+
 def load_config(
     *,
     agent_sk: str | None = None,
@@ -57,10 +69,21 @@ def load_config(
     server_pubkey: str | None = None,
     event_timeout: float = 90.0,
     actor_pubkey: str | None = None,
+    require_agent_key: bool = False,
 ) -> Config:
     """Build a :class:`Config`, defaulting the key/relay to the fork config."""
     sk = agent_sk or os.environ.get("NOSTRHOST_AGENT_SK") or os.environ.get("NOSTRHOST_OPERATOR_SK")
     relay = control_relay or os.environ.get("NOSTRHOST_CONTROL_RELAY")
+    if require_agent_key and not (agent_sk or os.environ.get("NOSTRHOST_AGENT_SK")):
+        # M6: a network-facing process must never silently hold the operator
+        # key. The operator provisions a scoped agent key (which the control
+        # plane's trusted-broker support lets relay client actors) — or, if
+        # they truly intend operator-key operation, sets NOSTRHOST_AGENT_SK
+        # to that key explicitly. Never fall back to reading operator.toml.
+        raise ValueError(
+            "serving over HTTP requires a scoped agent key: pass --agent-sk or set NOSTRHOST_AGENT_SK "
+            "(the operator key must not be held by a network-facing process)"
+        )
     if sk:
         sk = str(sk).strip()
         if not is_hex64(sk):
@@ -70,10 +93,18 @@ def load_config(
             _, _, relay = _fork_operator_defaults(None)
     else:
         sk, pubkey, relay = _fork_operator_defaults(relay)
+    # Server-signature verification key: explicit flag/env wins; otherwise
+    # derive it from the fork operator config (the daemon's server key). If
+    # it is still unset, result verification FAILS CLOSED (verify_result_event
+    # returns False) — loopback is not a trust boundary.
     if server_pubkey:
         server_pubkey = str(server_pubkey).strip()
-        if not is_hex64(server_pubkey):
-            raise ValueError("server pubkey must be 64 hex characters")
+    elif os.environ.get("NOSTRHOST_SERVER_PUBKEY"):
+        server_pubkey = os.environ.get("NOSTRHOST_SERVER_PUBKEY").strip()
+    else:
+        server_pubkey = _fork_server_pubkey()
+    if server_pubkey and not is_hex64(server_pubkey):
+        raise ValueError("server pubkey must be 64 hex characters")
     return Config(
         agent_sk=sk,
         agent_pubkey=pubkey,

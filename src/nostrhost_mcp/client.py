@@ -70,9 +70,16 @@ class OperationClient:
         return self._adapter.events(request_id, timeout=self.config.event_timeout)
 
     def verify_result_event(self, event: dict[str, Any]) -> bool:
-        """Best-effort server-signature check on a 2203/2204/2205 event."""
+        """Server-signature check on a 2203/2204/2205 event.
+
+        Fails CLOSED when no server pubkey is configured: loopback is not a
+        trust boundary, and an unverified result (possibly forged by any
+        local process) must never be presented to a client/agent as genuine.
+        ``load_config`` derives the server pubkey from the fork operator
+        config, so a normal deployment always has one.
+        """
         if not self.config.server_pubkey:
-            return True  # no server key configured -> trust the loopback relay
+            return False
         return _verify_server_signature(event, self.config.server_pubkey)
 
     @staticmethod

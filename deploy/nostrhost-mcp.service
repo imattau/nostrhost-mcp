@@ -10,6 +10,13 @@ Type=simple
 # DNS-rebinding protection, so a reverse-proxy Host name must be allowlisted
 # via NOSTRHOST_MCP_ALLOWED_HOSTS in /etc/nostrhost/mcp.env (space/comma
 # separated). Without it, proxied requests are rejected with 421.
+#
+# SECURITY (M6): `serve --http` fails closed unless a SCOPED agent key is
+# provisioned — set NOSTRHOST_AGENT_SK in /etc/nostrhost/mcp.env (never the
+# operator key). The control plane treats that key as a trusted broker, so it
+# can relay authenticated client actors without holding operator authority.
+# Deployments should additionally run this unit as a dedicated non-root user
+# (e.g. User=nostrhost-mcp) with mcp.env readable by that user.
 ExecStart=/opt/nostrhost/venv/bin/nostrhost-mcp serve --http 8930
 EnvironmentFile=-/etc/nostrhost/mcp.env
 Restart=on-failure
