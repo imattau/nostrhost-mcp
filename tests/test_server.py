@@ -54,12 +54,14 @@ def _config() -> Config:
     )
 
 
-def _stream(started=True, progress=None, result=None):
+def _stream(started=True, progress=None, rejection=None, result=None):
     events = []
     if started:
         events.append({"kind": 2203, "id": "1" * 64, "pubkey": "d" * 64, "sig": "e" * 128, "content": ""})
     if progress:
         events.append({"kind": 2205, "id": "2" * 64, "pubkey": "d" * 64, "sig": "e" * 128, "content": json.dumps(progress)})
+    if rejection:
+        events.append({"kind": 2202, "id": "4" * 64, "pubkey": "d" * 64, "sig": "e" * 128, "content": json.dumps(rejection)})
     if result:
         events.append({"kind": 2204, "id": "3" * 64, "pubkey": "d" * 64, "sig": "e" * 128, "content": json.dumps(result)})
     return events
@@ -187,13 +189,7 @@ async def test_op_status_rejects_bad_id():
 
 @pytest.mark.asyncio
 async def test_op_status_surfaces_rejection():
-    client = FakeClient(
-        streams={
-            REQ_ID: [
-                {"kind": 2202, "id": "1" * 64, "pubkey": "d" * 64, "sig": "e" * 128, "content": json.dumps({"reason": "not today"})}
-            ]
-        }
-    )
+    client = FakeClient(streams={REQ_ID: _stream(started=False, rejection={"reason": "not today"})})
     server = NostrHostServer(client, _config(), catalog=FAKE_CATALOG)
     result = await server.call_tool("op_status", {"operation_id": REQ_ID})
     body = json.loads(result.content[0].text)
@@ -209,6 +205,23 @@ async def test_read_tool_timeout_returns_pending():
     body = json.loads(result.content[0].text)
     assert body["status"] == "pending"
     assert body["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_read_tool_surfaces_rejection_immediately():
+    """A rejected read op must be reported as such, not run to timeout.
+
+    Previously ``_run_to_result`` only reacted to progress/result events, so
+    a kind-2202 rejection was silently skipped and the call fell through to
+    the "pending"/timeout path. It now shares the same event handling as
+    ``op_status`` and returns immediately."""
+    client = FakeClient(streams={REQ_ID: _stream(rejection={"reason": "not today"})})
+    server = NostrHostServer(client, _config(), catalog=FAKE_CATALOG)
+    result = await server.call_tool("system.status", {}, context=FakeContext())
+    body = json.loads(result.content[0].text)
+    assert body["ok"] is False
+    assert body["status"] == "rejected"
+    assert body["error"] == "not today"
 
 
 # -- Phase 3b: nsite redaction + parity --------------------------------------

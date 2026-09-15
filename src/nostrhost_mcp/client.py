@@ -2,8 +2,10 @@
 
 ``NostrMCPAdapter`` (in the fork) owns the signed kind-2200 authoring,
 publishing and chain correlation; this module wires it to a real relay
-transport and adds 2204 server-signature verification + result redaction —
-the layers the adapter keeps (docs/MCP-TRANSITION.md §2).
+transport and adds 2204 server-signature verification — one of the layers
+the adapter keeps (docs/MCP-TRANSITION.md §2). Result redaction lives in
+``nostrhost_mcp.redaction`` and is applied by the server before a result
+reaches an MCP client.
 """
 
 from __future__ import annotations
@@ -30,15 +32,6 @@ def _verify_server_signature(event: dict[str, Any], server_pubkey: str) -> bool:
         return bool(parsed.verify())
     except Exception:  # noqa: BLE001 - malformed SDK event/key means failed verification
         return False
-
-
-def _redact_result(body: dict[str, Any]) -> dict[str, Any]:
-    """Redact secret-shaped values before returning results to an AI model."""
-    try:
-        from nostrhost_policy.redaction import redact
-    except ImportError:
-        return body
-    return redact(body)
 
 
 class OperationClient:

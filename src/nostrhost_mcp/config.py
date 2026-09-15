@@ -13,6 +13,11 @@ import os
 from dataclasses import dataclass
 
 
+def is_hex64(value: str) -> bool:
+    """True if ``value`` is exactly 64 lowercase/uppercase hex characters."""
+    return len(value) == 64 and all(c in "0123456789abcdefABCDEF" for c in value)
+
+
 @dataclass(frozen=True)
 class Config:
     agent_sk: str
@@ -58,7 +63,7 @@ def load_config(
     relay = control_relay or os.environ.get("NOSTRHOST_CONTROL_RELAY")
     if sk:
         sk = str(sk).strip()
-        if not (len(sk) == 64 and all(c in "0123456789abcdefABCDEF" for c in sk)):
+        if not is_hex64(sk):
             raise ValueError("agent secret key must be 64 hex characters")
         pubkey = _derive_pubkey(sk)
         if not relay:
@@ -67,7 +72,7 @@ def load_config(
         sk, pubkey, relay = _fork_operator_defaults(relay)
     if server_pubkey:
         server_pubkey = str(server_pubkey).strip()
-        if not (len(server_pubkey) == 64 and all(c in "0123456789abcdefABCDEF" for c in server_pubkey)):
+        if not is_hex64(server_pubkey):
             raise ValueError("server pubkey must be 64 hex characters")
     return Config(
         agent_sk=sk,

@@ -21,7 +21,8 @@ from mcp.types import CallToolResult, TextContent
 
 from . import __version__
 from .client import OperationClient, OperationClientError
-from .config import Config
+from .config import Config, is_hex64
+from .redaction import redact
 from .registry import catalog_by_name, load_catalog, local_helper_tools, tool_meta
 
 KIND_EXECUTION_STARTED = 2203
@@ -102,33 +103,68 @@ class NostrHostServer(MCPServer):
         }
         return CallToolResult(content=[TextContent(type="text", text=json.dumps(body, indent=2))])
 
-    async def _run_to_result(self, tool: str, request_id: str, context) -> CallToolResult:
-        """Stream the chain to the terminal 2204 and return the redacted result."""
+    async def _typed_events(self, request_id: str):
+        """Yield verified, typed chain events for ``request_id``.
+
+        Pumps the client's event stream (via ``asyncio.to_thread``, since the
+        underlying iterator blocks), drops any event that fails
+        ``verify_result_event``, and yields ``(kind, body)`` for the four
+        chain-event kinds a caller might care about: started, progress,
+        rejection and result. ``body`` is the parsed event payload (an empty
+        dict for the started event, which carries no content). Any other
+        event kind, or a relay/stream hiccup, ends iteration silently — a
+        stream problem must not crash the server.
+        """
         events = self._client.events(request_id)
-        progress: dict[str, Any] = {}
         try:
             while True:
                 event = await asyncio.to_thread(next, events, None)
                 if event is None:
-                    break
+                    return
                 if not self._client.verify_result_event(event):
                     continue
                 kind = int(event.get("kind") or 0)
-                if kind == KIND_EXECUTION_PROGRESS:
-                    body = self._client.parse_progress_event(event)
-                    if body:
-                        progress = body
-                        try:
-                            p = float(body.get("progress") or 0)
-                            if context is not None:
-                                await context.report_progress(max(0.0, min(1.0, p)), 1.0)
-                        except (TypeError, ValueError):
-                            pass
+                if kind == KIND_EXECUTION_STARTED:
+                    yield kind, {}
+                elif kind == KIND_EXECUTION_PROGRESS:
+                    yield kind, self._client.parse_progress_event(event)
+                elif kind == KIND_OPERATION_REJECTION:
+                    reason = ""
+                    try:
+                        reason = str((json.loads(event.get("content") or "{}") or {}).get("reason") or "")
+                    except (TypeError, json.JSONDecodeError):
+                        pass
+                    yield kind, {"reason": reason}
                 elif kind == KIND_EXECUTION_RESULT:
-                    body = self._client.parse_result_event(event)
-                    return self._result_content(body, request_id, tool)
+                    yield kind, self._client.parse_result_event(event)
         except Exception:  # noqa: BLE001 - a relay/stream hiccup must not crash the server
-            pass
+            return
+
+    async def _run_to_result(self, tool: str, request_id: str, context) -> CallToolResult:
+        """Stream the chain to the terminal 2204 and return the redacted result."""
+        progress: dict[str, Any] = {}
+        async for kind, body in self._typed_events(request_id):
+            if kind == KIND_EXECUTION_PROGRESS:
+                if body:
+                    progress = body
+                    try:
+                        p = float(body.get("progress") or 0)
+                        if context is not None:
+                            await context.report_progress(max(0.0, min(1.0, p)), 1.0)
+                    except (TypeError, ValueError):
+                        pass
+            elif kind == KIND_OPERATION_REJECTION:
+                # Previously unhandled here: this loop only reacted to
+                # progress/result events, so a rejected operation ran to the
+                # full event_timeout and came back as "pending" instead of
+                # reporting the rejection immediately.
+                return self._result_content(
+                    {"ok": False, "status": "rejected", "error": body.get("reason") or "operation rejected"},
+                    request_id,
+                    tool,
+                )
+            elif kind == KIND_EXECUTION_RESULT:
+                return self._result_content(body, request_id, tool)
         return self._result_content(
             {"ok": False, "status": "pending", "error": f"no terminal result within {self._config.event_timeout}s", "_nostr_progress": progress},
             request_id,
@@ -137,41 +173,24 @@ class NostrHostServer(MCPServer):
 
     async def _call_op_status(self, arguments: dict[str, Any], context) -> CallToolResult:
         operation_id = str((arguments or {}).get("operation_id") or "").strip()
-        if len(operation_id) != 64 or any(c not in "0123456789abcdefABCDEF" for c in operation_id):
+        if not is_hex64(operation_id):
             raise ToolError("op_status requires a 64-hex operation_id")
-        events = self._client.events(operation_id)
         latest: dict[str, Any] = {"phase": "REQUESTED"}
-        try:
-            while True:
-                event = await asyncio.to_thread(next, events, None)
-                if event is None:
-                    break
-                if not self._client.verify_result_event(event):
-                    continue
-                kind = int(event.get("kind") or 0)
-                if kind == KIND_EXECUTION_STARTED:
-                    latest = {"phase": "EXECUTING"}
-                elif kind == KIND_EXECUTION_PROGRESS:
-                    body = self._client.parse_progress_event(event)
-                    if body:
-                        latest = {"phase": "EXECUTING", "stage": body.get("stage"), "progress": body.get("progress")}
-                elif kind == KIND_OPERATION_REJECTION:
-                    reason = ""
-                    try:
-                        reason = str((json.loads(event.get("content") or "{}") or {}).get("reason") or "")
-                    except (TypeError, json.JSONDecodeError):
-                        pass
-                    latest = {"phase": "REJECTED", "reason": reason}
-                    break
-                elif kind == KIND_EXECUTION_RESULT:
-                    body = self._client.parse_result_event(event)
-                    phase = "SUCCEEDED" if body.get("ok") else "FAILED"
-                    latest = {"phase": phase, **body}
-                    break
-        except Exception:  # noqa: BLE001 - a relay/stream hiccup must not crash the server
-            pass
+        async for kind, body in self._typed_events(operation_id):
+            if kind == KIND_EXECUTION_STARTED:
+                latest = {"phase": "EXECUTING"}
+            elif kind == KIND_EXECUTION_PROGRESS:
+                if body:
+                    latest = {"phase": "EXECUTING", "stage": body.get("stage"), "progress": body.get("progress")}
+            elif kind == KIND_OPERATION_REJECTION:
+                latest = {"phase": "REJECTED", "reason": body.get("reason", "")}
+                break
+            elif kind == KIND_EXECUTION_RESULT:
+                phase = "SUCCEEDED" if body.get("ok") else "FAILED"
+                latest = {"phase": phase, **body}
+                break
         body = {"operation_id": operation_id, **latest}
-        return CallToolResult(content=[TextContent(type="text", text=json.dumps(self._redact(body), indent=2))])
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(redact(body), indent=2))])
 
     def _call_mcp_status(self) -> CallToolResult:
         """Answer locally: is this endpoint up, and who is this call recognised as.
@@ -206,14 +225,10 @@ class NostrHostServer(MCPServer):
 
     def _result_content(self, body: dict[str, Any], request_id: str, tool: str) -> CallToolResult:
         payload = {"operation_id": request_id, "tool": tool, **body}
-        return CallToolResult(content=[TextContent(type="text", text=json.dumps(self._redact(payload, tool=tool), indent=2))])
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(self._redact_payload(payload, tool=tool), indent=2))])
 
     @staticmethod
-    def _redact(value: Any, *, tool: str = "") -> Any:
-        try:
-            from nostrhost_policy.redaction import redact
-        except ImportError:
-            return value
+    def _redact_payload(value: Any, *, tool: str = "") -> Any:
         value = redact(value)
         if tool.startswith("nsite."):
             return NostrHostServer._redact_nsite(value)
