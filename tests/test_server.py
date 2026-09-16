@@ -76,7 +76,7 @@ async def test_list_tools_includes_catalog_and_helpers():
     assert "app.install" in names
     assert "op_status" in names
     assert "mcp_status" in names
-    assert len(names) == len(FAKE_CATALOG) + 2
+    assert len(names) == len(FAKE_CATALOG["operations"]) + 2
 
 
 @pytest.mark.asyncio
@@ -114,6 +114,48 @@ async def test_write_tool_returns_approval_required_immediately():
 
 
 @pytest.mark.asyncio
+async def test_admin_actor_on_write_tool_runs_to_result():
+    """An admin's own call is auto-approved by the daemon, so the adapter must
+    not report approval_required for it - it streams to the terminal result."""
+    client = FakeClient(streams={REQ_ID: _stream(result={"ok": True, "result": {"installed": "foo"}})})
+    config = Config(
+        agent_sk="b" * 64,
+        agent_pubkey="c" * 64,
+        control_relay="ws://127.0.0.1:4848",
+        admin_pubkeys=("f" * 64,),
+    )
+    server = NostrHostServer(client, config, catalog=FAKE_CATALOG)
+    token = actor_context.set("f" * 64)
+    try:
+        result = await server.call_tool("app.install", {"app": "foo"})
+    finally:
+        actor_context.reset(token)
+    body = json.loads(result.content[0].text)
+    assert body["ok"] is True
+    assert body["result"] == {"installed": "foo"}
+    assert "status" not in body or body.get("status") != "approval_required"
+
+
+@pytest.mark.asyncio
+async def test_non_admin_actor_on_write_tool_still_returns_approval_required():
+    client = FakeClient()
+    config = Config(
+        agent_sk="b" * 64,
+        agent_pubkey="c" * 64,
+        control_relay="ws://127.0.0.1:4848",
+        admin_pubkeys=("f" * 64,),
+    )
+    server = NostrHostServer(client, config, catalog=FAKE_CATALOG)
+    token = actor_context.set("0" * 64)
+    try:
+        result = await server.call_tool("app.install", {"app": "foo"})
+    finally:
+        actor_context.reset(token)
+    body = json.loads(result.content[0].text)
+    assert body["status"] == "approval_required"
+
+
+@pytest.mark.asyncio
 async def test_actor_is_passed_to_submit():
     client = FakeClient(streams={REQ_ID: _stream(result={"ok": True, "result": {}})})
     server = NostrHostServer(client, _config(), catalog=FAKE_CATALOG)
@@ -132,7 +174,7 @@ async def test_mcp_status_is_unbound_when_no_actor_configured():
     result = await server.call_tool("mcp_status", {})
     body = json.loads(result.content[0].text)
     assert body["server"] == "nostrhost-mcp"
-    assert body["tools_available"] == len(FAKE_CATALOG) + 2
+    assert body["tools_available"] == len(FAKE_CATALOG["operations"]) + 2
     assert body["control_relay"] == "ws://127.0.0.1:4848"
     assert body["actor"] is None
     assert body["actor_source"] == "unbound"
@@ -229,8 +271,8 @@ async def test_read_tool_surfaces_rejection_immediately():
 NSITE_CATALOG = [
     {
         "name": "nsite.publish",
-        "scope": "nsites.publish",
-        "require_approval": True,
+        "scopes": ["nsites.publish"],
+        "approval": {"minimum": "admin"},
         "risk": "medium",
         "reversibility": "reversible",
         "description": "publish a signed manifest",
@@ -238,26 +280,33 @@ NSITE_CATALOG = [
             "type": "object",
             "properties": {"event": {"type": "object"}, "plan_sha256": {"type": "string"}, "relays": {"type": "array"}},
         },
+        "result_schema": {"type": "object"},
     },
     {
         "name": "nsite.list",
-        "scope": "nsites.read",
-        "require_approval": False,
+        "scopes": ["nsites.read"],
+        "approval": {"minimum": "none"},
         "risk": "low",
         "reversibility": "reversible",
         "description": "registered sites",
         "input_schema": {"type": "object", "properties": {}},
+        "result_schema": {"type": "object"},
     },
     {
         "name": "nsite.resolve",
-        "scope": "nsites.read",
-        "require_approval": False,
+        "scopes": ["nsites.read"],
+        "approval": {"minimum": "none"},
         "risk": "low",
         "reversibility": "reversible",
         "description": "fetch a manifest",
         "input_schema": {"type": "object", "properties": {"label": {"type": "string"}}},
+        "result_schema": {"type": "object"},
     },
 ]
+
+
+def catalog_with(*entries):
+    return {**FAKE_CATALOG, "operations": [*FAKE_CATALOG["operations"], *entries]}
 
 
 @pytest.mark.asyncio
@@ -278,7 +327,7 @@ async def test_nsite_result_redacts_content_and_title():
             )
         }
     )
-    server = NostrHostServer(client, _config(), catalog=FAKE_CATALOG + NSITE_CATALOG)
+    server = NostrHostServer(client, _config(), catalog=catalog_with(*NSITE_CATALOG))
     result = await server.call_tool("nsite.list", {}, context=FakeContext())
     body = json.loads(result.content[0].text)
     site = body["result"]
@@ -302,7 +351,7 @@ async def test_nsite_publish_result_redacts_manifest_content():
             )
         }
     )
-    server = NostrHostServer(client, _config(), catalog=FAKE_CATALOG + NSITE_CATALOG)
+    server = NostrHostServer(client, _config(), catalog=catalog_with(*NSITE_CATALOG))
     result = await server.call_tool("nsite.resolve", {}, context=FakeContext())
     body = json.loads(result.content[0].text)
     assert body["result"]["event"]["content"] == "[REDACTED]"
@@ -328,7 +377,7 @@ async def test_nsite_publish_submits_exact_admin_arguments():
     Admin wizard submits; a stale digest is the fork's job to reject, but the
     arguments must pass through verbatim (no re-shaping)."""
     client = FakeClient()
-    server = NostrHostServer(client, _config(), catalog=FAKE_CATALOG + NSITE_CATALOG)
+    server = NostrHostServer(client, _config(), catalog=catalog_with(*NSITE_CATALOG))
     event = {"id": "a" * 64, "kind": 15128, "tags": [["path", "/index.html", "b" * 64]], "sig": "c" * 128}
     plan_sha256 = "d" * 64
     await server.call_tool(

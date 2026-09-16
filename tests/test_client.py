@@ -35,12 +35,18 @@ def test_verify_server_signature_handles_malformed():
 def test_parse_result_event_extracts_body():
     from nostrhost_mcp.client import OperationClient as _Client
 
-    body = _Client.parse_result_event({"content": json.dumps({"ok": True, "result": {}})})
+    client = object.__new__(_Client)
+    client.catalog_digest = "sha256:test"
+    body = client.parse_result_event(
+        {"content": json.dumps({"ok": True, "catalog_digest": "sha256:test", "result": {}})}
+    )
     assert body["ok"] is True
     with pytest.raises(OperationClientError):
-        _Client.parse_result_event({"content": "not json"})
+        client.parse_result_event({"content": "not json"})
     with pytest.raises(OperationClientError):
-        _Client.parse_result_event({"content": json.dumps([1, 2])})
+        client.parse_result_event({"content": json.dumps([1, 2])})
+    with pytest.raises(OperationClientError, match="digest mismatch"):
+        client.parse_result_event({"content": json.dumps({"ok": True, "catalog_digest": "sha256:old"})})
 
 
 def test_load_config_derives_pubkey_and_relay():
@@ -49,6 +55,22 @@ def test_load_config_derives_pubkey_and_relay():
     assert len(cfg.agent_pubkey) == 64
     assert cfg.control_relay == "ws://127.0.0.1:4848"
     assert cfg.agent_sk == sk
+
+
+def test_load_config_admin_pubkeys_env_override(monkeypatch):
+    monkeypatch.setenv("NOSTRHOST_ADMIN_PUBKEYS", "A" * 64 + ", " + "b" * 64)
+    cfg = load_config(agent_sk="0" * 63 + "1", control_relay="ws://r")
+    assert cfg.admin_pubkeys == ("a" * 64, "b" * 64)
+
+
+def test_load_config_admin_pubkeys_default_empty_without_fork(monkeypatch):
+    monkeypatch.delenv("NOSTRHOST_ADMIN_PUBKEYS", raising=False)
+    monkeypatch.delenv("NOSTRHOST_OPERATOR_SK", raising=False)
+    monkeypatch.setenv("NOSTRHOST_OPERATOR_CONFIG", "/nonexistent/nostrhost-operator.toml")
+    cfg = load_config(agent_sk="0" * 63 + "1", control_relay="ws://r")
+    # The fork operator config is unavailable, so the admin set fails closed
+    # to empty (callers keep the approval boundary).
+    assert cfg.admin_pubkeys == ()
 
 
 def test_load_config_rejects_bad_key():

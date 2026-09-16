@@ -39,6 +39,9 @@ class OperationClient:
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        from .registry import load_catalog
+
+        self.catalog_digest = load_catalog()["digest"]
         self._adapter = self._build_adapter()
 
     def _build_adapter(self) -> Any:
@@ -82,8 +85,7 @@ class OperationClient:
             return False
         return _verify_server_signature(event, self.config.server_pubkey)
 
-    @staticmethod
-    def parse_result_event(event: dict[str, Any]) -> dict[str, Any]:
+    def parse_result_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """Extract the typed body of a kind-2204 result event."""
         try:
             body = json.loads(event.get("content") or "{}")
@@ -91,6 +93,8 @@ class OperationClient:
             raise OperationClientError("malformed 2204 content") from exc
         if not isinstance(body, dict):
             raise OperationClientError("malformed 2204 content")
+        if body.get("catalog_digest") != self.catalog_digest:
+            raise OperationClientError("2204 result catalogue digest mismatch")
         return body
 
     @staticmethod

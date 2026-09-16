@@ -1,10 +1,9 @@
 """Operation registry bridge: the fork's registry is the single source of
 truth, and this module turns its catalogue into MCP tool metadata.
 
-The fork exposes ``yunohost.nostr_operations.operation_catalog()`` (one entry
-per tool: name, scope, require_approval, risk, reversibility, description,
-input JSON Schema). Generated MCP tools, Admin forms and API docs all derive
-from that same catalogue — no second schema catalogue is maintained here.
+The fork exposes a versioned ``operation_catalog()`` document containing the
+canonical input/output schemas, scopes, approval floor and safety metadata.
+Generated MCP tools, Admin forms and API docs all derive from that document.
 """
 
 from __future__ import annotations
@@ -34,16 +33,21 @@ def ensure_yunohost() -> None:
             sys.modules.setdefault("yunohost", pkg)
 
 
-def load_catalog() -> list[dict[str, Any]]:
-    """The JSON-serialisable operation catalogue from the installed fork."""
+def load_catalog() -> dict[str, Any]:
+    """The versioned operation catalogue from the installed fork."""
     ensure_yunohost()
     from yunohost.nostr_operations import operation_catalog
 
-    return operation_catalog()
+    document = operation_catalog()
+    if not isinstance(document, dict) or document.get("schema_version") != 2:
+        raise RuntimeError("NostrHost operation catalogue v2 is required")
+    if not isinstance(document.get("operations"), list) or not isinstance(document.get("digest"), str):
+        raise RuntimeError("NostrHost operation catalogue v2 is malformed")
+    return document
 
 
-def catalog_by_name(catalog: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {entry["name"]: entry for entry in catalog}
+def catalog_by_name(catalog: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {entry["name"]: entry for entry in catalog["operations"]}
 
 
 def tool_meta(entry: dict[str, Any]) -> dict[str, Any]:
@@ -52,6 +56,8 @@ def tool_meta(entry: dict[str, Any]) -> dict[str, Any]:
         "name": entry["name"],
         "description": entry["description"],
         "input_schema": entry.get("input_schema") or {"type": "object", "properties": {}},
+        "output_schema": entry["result_schema"],
+        "approval_minimum": entry.get("approval", {}).get("minimum", "none"),
     }
 
 

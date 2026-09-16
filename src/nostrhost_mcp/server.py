@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -35,10 +37,20 @@ KIND_OPERATION_REJECTION = 2202
 actor_context: contextvars.ContextVar[str | None] = contextvars.ContextVar("nostrhost_mcp_actor", default=None)
 
 
+async def _run_blocking(function, /, *args):
+    """Run one blocking relay call without sharing executor lifecycle state."""
+    loop = asyncio.get_running_loop()
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nostrhost-mcp")
+    try:
+        return await loop.run_in_executor(executor, partial(function, *args))
+    finally:
+        executor.shutdown(wait=True)
+
+
 class NostrHostServer(MCPServer):
     """Generated MCP tools over the native operation chain."""
 
-    def __init__(self, client: OperationClient, config: Config, *, catalog: list[dict[str, Any]] | None = None) -> None:
+    def __init__(self, client: OperationClient, config: Config, *, catalog: dict[str, Any] | None = None) -> None:
         super().__init__(
             name="nostrhost-mcp",
             title="NostrHost MCP",
@@ -46,9 +58,11 @@ class NostrHostServer(MCPServer):
             description="Thin MCP protocol adapter over the NostrHost native operation model",
             instructions=(
                 "Tools are generated from the NostrHost operation registry. Read tools run "
-                "immediately; write tools return approval_required + operation_id and execute "
-                "only after an administrator (or NIP-46 owner) signs the approval in the "
-                "control plane. Poll with op_status to collect the final result."
+                "immediately; write tools called by an admin run immediately too (the admin's "
+                "own authority is the approval), while a non-admin caller gets "
+                "approval_required + operation_id and the operation executes once an "
+                "administrator (or NIP-46 owner) signs the approval in the control plane. "
+                "Poll with op_status to collect the final result."
             ),
         )
         self._client = client
@@ -59,9 +73,18 @@ class NostrHostServer(MCPServer):
         self._rebuild_tools()
 
     def _rebuild_tools(self) -> None:
-        metas = [tool_meta(entry) for entry in self._catalog] + local_helper_tools()
+        metas = [tool_meta(entry) for entry in self._catalog["operations"]] + local_helper_tools()
         self._tools = [
-            MCPTool(name=meta["name"], title=meta["name"], description=meta["description"], input_schema=meta["input_schema"])
+            MCPTool(
+                name=meta["name"],
+                title=meta["name"],
+                description=meta["description"],
+                inputSchema=meta["input_schema"],
+                # Approval-gated calls return an asynchronous approval envelope,
+                # not the operation's terminal result. Advertising the terminal
+                # schema there would make the MCP contract false.
+                outputSchema=(meta.get("output_schema") if meta.get("approval_minimum") == "none" else None),
+            )
             for meta in metas
         ]
 
@@ -80,15 +103,26 @@ class NostrHostServer(MCPServer):
             raise ToolError(f"unknown tool {name!r}")
         actor = actor_context.get() or self._config.actor_pubkey
         try:
-            submitted = await asyncio.to_thread(self._client.submit, name, arguments or {}, actor and actor or None)
+            submitted = await _run_blocking(self._client.submit, name, arguments or {}, actor and actor or None)
         except OperationClientError as exc:
             raise ToolError(str(exc)) from exc
         request_id = submitted.get("_nostr", {}).get("request_id")
         if not request_id:
             raise ToolError("operation submission did not return a request id")
-        if spec.get("require_approval"):
+        if spec.get("approval", {}).get("minimum") != "none" and not self._actor_is_admin(actor):
             return self._approval_required(name, request_id, spec)
         return await self._run_to_result(name, request_id, context)
+
+    def _actor_is_admin(self, actor: str | None) -> bool:
+        """Whether the authenticated actor is a configured admin.
+
+        The control-plane daemon auto-approves an approval-gated operation
+        whose actor is an admin, so an admin's own call reaches a terminal
+        result without a separate approval - reporting ``approval_required``
+        for it would be false. Empty/unresolvable admin set fails closed
+        (the caller sees the normal approval_required boundary).
+        """
+        return bool(actor) and actor.lower() in self._config.admin_pubkeys
 
     # -- result translation -------------------------------------------------- #
 
@@ -97,7 +131,7 @@ class NostrHostServer(MCPServer):
             "status": "approval_required",
             "operation_id": request_id,
             "tool": tool,
-            "scope": spec.get("scope"),
+            "scopes": spec.get("scopes", []),
             "risk": spec.get("risk"),
             "note": "approval happens in the control plane (nostr-opctl approve or NIP-46); poll op_status for the result",
         }
@@ -116,11 +150,32 @@ class NostrHostServer(MCPServer):
         stream problem must not crash the server.
         """
         events = self._client.events(request_id)
+        queue: asyncio.Queue[object] = asyncio.Queue()
+        finished = object()
+        loop = asyncio.get_running_loop()
+
+        def pump() -> None:
+            """Consume the blocking relay iterator in one worker invocation.
+
+            A single producer keeps iterator ownership on one thread and
+            preserves event ordering while the async consumer reports progress.
+            """
+            try:
+                for event in events:
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+            except Exception:  # noqa: BLE001 - normalized to end-of-stream below
+                pass
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, finished)
+
+        producer = asyncio.create_task(_run_blocking(pump))
         try:
             while True:
-                event = await asyncio.to_thread(next, events, None)
-                if event is None:
+                event = await queue.get()
+                if event is finished:
                     return
+                if not isinstance(event, dict):
+                    continue
                 if not self._client.verify_result_event(event):
                     continue
                 kind = int(event.get("kind") or 0)
@@ -139,6 +194,10 @@ class NostrHostServer(MCPServer):
                     yield kind, self._client.parse_result_event(event)
         except Exception:  # noqa: BLE001 - a relay/stream hiccup must not crash the server
             return
+        finally:
+            # The relay iterator is contractually finite (terminal result,
+            # rejection, or configured timeout). Let its worker finish cleanly.
+            await producer
 
     async def _run_to_result(self, tool: str, request_id: str, context) -> CallToolResult:
         """Stream the chain to the terminal 2204 and return the redacted result."""
@@ -225,7 +284,14 @@ class NostrHostServer(MCPServer):
 
     def _result_content(self, body: dict[str, Any], request_id: str, tool: str) -> CallToolResult:
         payload = {"operation_id": request_id, "tool": tool, **body}
-        return CallToolResult(content=[TextContent(type="text", text=json.dumps(self._redact_payload(payload, tool=tool), indent=2))])
+        redacted = self._redact_payload(payload, tool=tool)
+        structured = None
+        if body.get("ok") is True and isinstance(redacted.get("result"), dict):
+            structured = redacted["result"]
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(redacted, indent=2))],
+            structuredContent=structured,
+        )
 
     @staticmethod
     def _redact_payload(value: Any, *, tool: str = "") -> Any:

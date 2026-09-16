@@ -26,6 +26,7 @@ class Config:
     server_pubkey: str | None = None
     event_timeout: float = 90.0
     actor_pubkey: str | None = None
+    admin_pubkeys: tuple[str, ...] = ()
 
 
 def _derive_pubkey(sk: str) -> str:
@@ -60,6 +61,24 @@ def _fork_server_pubkey() -> str | None:
         return _operator_config(None, None).server_pubkey
     except Exception:  # noqa: BLE001 - unavailable fork config means no key
         return None
+
+
+def _fork_admin_pubkeys() -> tuple[str, ...]:
+    """The configured admin pubkeys from the fork operator config.
+
+    The daemon auto-approves an approval-gated operation when its actor is an
+    admin (``OperationEngine._actor_approves``); the adapter needs the same
+    set so it does not report ``approval_required`` for an admin's own call.
+    Empty when the fork config is unavailable (development / unbootstrapped),
+    which makes the adapter fall back to reporting ``approval_required``
+    (fail closed).
+    """
+    try:
+        from yunohost.nostr_operations import _operator_config
+
+        return tuple(str(admin).lower() for admin in _operator_config(None, None).admins if admin)
+    except Exception:  # noqa: BLE001 - unavailable fork config means no admin set
+        return ()
 
 
 def load_config(
@@ -105,6 +124,14 @@ def load_config(
         server_pubkey = _fork_server_pubkey()
     if server_pubkey and not is_hex64(server_pubkey):
         raise ValueError("server pubkey must be 64 hex characters")
+    # Admin set used to decide whether an approval-gated tool auto-executes.
+    # Explicit env wins (comma-separated); otherwise derive it from the same
+    # operator config the daemon reads so the two never drift.
+    raw_admins = os.environ.get("NOSTRHOST_ADMIN_PUBKEYS")
+    if raw_admins is not None:
+        admin_pubkeys = tuple(part.strip().lower() for part in raw_admins.split(",") if part.strip())
+    else:
+        admin_pubkeys = _fork_admin_pubkeys()
     return Config(
         agent_sk=sk,
         agent_pubkey=pubkey,
@@ -112,4 +139,5 @@ def load_config(
         server_pubkey=server_pubkey,
         event_timeout=max(1.0, float(event_timeout)),
         actor_pubkey=actor_pubkey,
+        admin_pubkeys=admin_pubkeys,
     )
