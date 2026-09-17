@@ -291,6 +291,12 @@ class NostrHostServer(MCPServer):
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(redacted, indent=2))],
             structuredContent=structured,
+            # Generated tools advertise the operation's success schema.  A
+            # rejection or timeout cannot satisfy that schema, so mark it as
+            # a protocol-level tool error.  MCP clients then surface the text
+            # envelope instead of rejecting the response for missing
+            # structured content and misreporting the whole server as down.
+            isError=body.get("ok") is not True,
         )
 
     @staticmethod

@@ -247,6 +247,8 @@ async def test_read_tool_timeout_returns_pending():
     body = json.loads(result.content[0].text)
     assert body["status"] == "pending"
     assert body["ok"] is False
+    assert result.is_error is True
+    assert result.structured_content is None
 
 
 @pytest.mark.asyncio
@@ -264,6 +266,8 @@ async def test_read_tool_surfaces_rejection_immediately():
     assert body["ok"] is False
     assert body["status"] == "rejected"
     assert body["error"] == "not today"
+    assert result.is_error is True
+    assert result.structured_content is None
 
 
 # -- Phase 3b: nsite redaction + parity --------------------------------------
