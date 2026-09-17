@@ -154,6 +154,7 @@ def test_real_catalog_includes_nsite_tools_with_schemas():
     for name in (
         "nsite.gateway.status",
         "nsite.list",
+        "nsite.discover",
         "nsite.inspect",
         "nsite.resolve",
         "nsite.validate_manifest",
@@ -186,5 +187,5 @@ def test_nsite_write_tools_require_approval():
     by_name = catalog_by_name(catalog)
     for name in ("nsite.publish", "nsite.snapshot", "nsite.mirror", "nsite.register", "nsite.unregister", "nsite.domain.attach", "nsite.domain.detach"):
         assert by_name[name]["approval"]["minimum"] == "admin"
-    for name in ("nsite.list", "nsite.inspect", "nsite.resolve", "nsite.validate_manifest", "nsite.publish.plan", "nsite.domain.list"):
+    for name in ("nsite.list", "nsite.discover", "nsite.inspect", "nsite.resolve", "nsite.validate_manifest", "nsite.publish.plan", "nsite.domain.list"):
         assert by_name[name]["approval"]["minimum"] == "none"
