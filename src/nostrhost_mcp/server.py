@@ -314,13 +314,15 @@ class NostrHostServer(MCPServer):
         comes from the manifest's untrusted ``title`` tag — both are replaced
         with a marker before they can reach an MCP client's context, so a
         hostile manifest cannot inject text (prompt injection) or bloat the
-        result. Identity (pubkey/label/kind/d/hashes) is preserved.
+        result. Identity (pubkey/label/kind/d/hashes) is preserved. Curated
+        collections (kind 30004) carry their own untrusted ``title``,
+        ``description`` and ``image`` fields, which are redacted the same way.
         """
         if isinstance(value, dict):
             return {
                 k: (
                     "[REDACTED]"
-                    if k in ("content", "title") and isinstance(v, str)
+                    if k in ("content", "title", "description", "image") and isinstance(v, str)
                     else NostrHostServer._redact_nsite(v)
                 )
                 for k, v in value.items()
