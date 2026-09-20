@@ -404,6 +404,7 @@ source = { editable = "." }
 dependencies = [
     { name = "mcp", extra = ["cli"] },
     { name = "nostr-sdk" },
+    { name = "nostrhost-protocol" },
 ]
 
 [package.dev-dependencies]
@@ -416,12 +417,26 @@ dev = [
 requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=2.1.1" },
     { name = "nostr-sdk", specifier = ">=0.45.1" },
+    { name = "nostrhost-protocol", directory = "../nostrhost-protocol/python" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
+]
+
+[[package]]
+name = "nostrhost-protocol"
+version = "0.1.0"
+source = { directory = "../nostrhost-protocol/python" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "jsonschema", specifier = ">=4.0" },
+    { name = "pytest", specifier = ">=8" },
 ]
 
 [[package]]

@@ -21,16 +21,19 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.server import MCPTool
 from mcp.types import CallToolResult, TextContent
 
+# One-release aliases of the canonical nostrhost-protocol constants.
+from nostrhost_protocol import (
+    KindExecutionProgress as KIND_EXECUTION_PROGRESS,
+    KindExecutionResult as KIND_EXECUTION_RESULT,
+    KindExecutionStarted as KIND_EXECUTION_STARTED,
+    KindOperationRejection as KIND_OPERATION_REJECTION,
+)
+
 from . import __version__
 from .client import OperationClient, OperationClientError
 from .config import Config, is_hex64
 from .redaction import redact
 from .registry import catalog_by_name, load_catalog, local_helper_tools, tool_meta
-
-KIND_EXECUTION_STARTED = 2203
-KIND_EXECUTION_PROGRESS = 2205
-KIND_EXECUTION_RESULT = 2204
-KIND_OPERATION_REJECTION = 2202
 
 # The authenticated actor (HTTP transport) rides a contextvar so call_tool can
 # tag the signed request with the client npub without per-call plumbing.

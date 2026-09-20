@@ -8,6 +8,7 @@ requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=2.1.1",
     "nostr-sdk>=0.45.1",
+    "nostrhost-protocol>=0.1.0",
 ]
 
 [project.scripts]
@@ -26,3 +27,6 @@ packages = ["src/nostrhost_mcp"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.uv.sources]
+nostrhost-protocol = { path = "../nostrhost-protocol/python" }
