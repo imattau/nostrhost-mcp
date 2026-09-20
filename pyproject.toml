@@ -1,6 +1,6 @@
 [project]
 name = "nostrhost-mcp"
-version = "0.1.2"
+version = "0.2.0"
 description = "Thin MCP protocol adapter over the NostrHost native operation model"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -9,6 +9,7 @@ dependencies = [
     "mcp[cli]>=2.1.1",
     "nostr-sdk>=0.45.1",
     "nostrhost-protocol>=0.1.0",
+    "nostrhost-auth>=0.2.0",
 ]
 
 [project.scripts]
@@ -30,3 +31,4 @@ asyncio_mode = "auto"
 
 [tool.uv.sources]
 nostrhost-protocol = { path = "../nostrhost-protocol/python" }
+nostrhost-auth = { path = "../nostrhost-auth" }

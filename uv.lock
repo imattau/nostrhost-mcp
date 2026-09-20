@@ -398,12 +398,36 @@ wheels = [
 ]
 
 [[package]]
+name = "nostrhost-auth"
+version = "0.2.0"
+source = { directory = "../nostrhost-auth" }
+dependencies = [
+    { name = "nostr-sdk" },
+    { name = "nostrhost-protocol" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "nostr-sdk", specifier = ">=0.45.1" },
+    { name = "nostrhost-protocol", directory = "../nostrhost-protocol/python" },
+    { name = "pydantic", specifier = ">=2.13.5" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+]
+
+[[package]]
 name = "nostrhost-mcp"
-version = "0.1.2"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp", extra = ["cli"] },
     { name = "nostr-sdk" },
+    { name = "nostrhost-auth" },
     { name = "nostrhost-protocol" },
 ]
 
@@ -417,6 +441,7 @@ dev = [
 requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=2.1.1" },
     { name = "nostr-sdk", specifier = ">=0.45.1" },
+    { name = "nostrhost-auth", directory = "../nostrhost-auth" },
     { name = "nostrhost-protocol", directory = "../nostrhost-protocol/python" },
 ]
 

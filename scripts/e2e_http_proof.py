@@ -10,7 +10,7 @@ import json
 
 import httpx
 
-from nostrhost_policy.auth.signing import ClientIdentity
+from nostrhost_auth.signing import ClientIdentity
 
 URL = "http://127.0.0.1:8930/mcp"
 

@@ -27,10 +27,10 @@ class Nip98Auth:
         if self._verify is not None:
             return
         try:
-            from nostrhost_policy.auth.nip98 import verify_nip98_request
-            from nostrhost_policy.auth.replay import ReplayCache
-        except ImportError as exc:  # pragma: no cover - policy not installed
-            raise AuthError("nostrhost-policy is not installed; the HTTP transport cannot authenticate clients") from exc
+            from nostrhost_auth.nip98 import verify_nip98_request
+            from nostrhost_auth.replay import ReplayCache
+        except ImportError as exc:  # pragma: no cover - auth not installed
+            raise AuthError("nostrhost-auth is not installed; the HTTP transport cannot authenticate clients") from exc
 
         self._replay = ReplayCache()
         self._verify = verify_nip98_request
